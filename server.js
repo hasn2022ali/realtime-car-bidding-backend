@@ -122,7 +122,7 @@ wss.on("connection", (ws) => {
         }
         const { userId } = authenticatedClients.get(ws);
         console.log("placing new BID", userId);
-        await placeBid(data.auctionId, data.amount, userId, ws);
+        await placeBid(data.auctionId, data.amount, userId, data.username, ws);
         break;
       case "GET_AUCTION_STATUS":
         await sendAuctionStatus(data.carId, ws);
@@ -163,7 +163,7 @@ async function createAuction(carId, startingPrice) {
   }
 }
 
-async function placeBid(auctionId, amount, bidderId, ws) {
+async function placeBid(auctionId, amount, bidderId, username, ws) {
   console.log("bidder id", bidderId);
   console.log("auctionId id", auctionId);
   console.log("amount", amount);
@@ -216,7 +216,7 @@ async function placeBid(auctionId, amount, bidderId, ws) {
         `auction:${auctionId}`,
         JSON.stringify({ highestBid: amount, highestBidder: bidderId })
       );
-      await broadcastAuctionStatus(auctionId);
+      await broadcastAuctionStatus(auctionId, bidderId, username);
     } else {
       console.log("the amount is small");
       await connection.rollback();
@@ -232,7 +232,7 @@ async function placeBid(auctionId, amount, bidderId, ws) {
 async function getAuctionStatuses(carId, ws) {
   const connection = await dbPool.getConnection();
   const [rows] = await connection.query(
-    "SELECT auction_id as auctionId, amount as highestBid FROM user_bids WHERE auction_id = ? order by id desc limit 10",
+    "SELECT user_bids.auction_id as auctionId, user_bids.amount as highestBid, users.username, user_bids.user_id as user_id  FROM user_bids inner join users on user_bids.user_id = users.id  WHERE auction_id = ? order by user_bids.id desc limit 10",
     [carId]
   );
 
@@ -261,7 +261,7 @@ async function sendAuctionStatus(carId, ws) {
   }
 }
 
-async function broadcastAuctionStatus(carId) {
+async function broadcastAuctionStatus(carId, bidderId = null, username = null) {
   try {
     const auctionData = await redis.get(`auction:${carId}`);
     console.log("getting auction details:", auctionData);
@@ -271,6 +271,8 @@ async function broadcastAuctionStatus(carId) {
         type: "AUCTION_STATUS",
         carId,
         highestBid: auction.highestBid,
+        user_id: bidderId,
+        username: username,
       });
       subscriptions.get(carId).forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
